@@ -28,7 +28,7 @@ def index():
 @app.route('/charadas', methods=['GET'])
 def charada():
     charada_aleatoria = random.choice(charadas)
-    return (f"Charada:\n{charada_aleatoria}")  
+    return jsonify(charada_aleatoria), 200
 
 @app.route('/charadas/<int:id>', methods=['GET'])
 def busca(id):
@@ -39,4 +39,4 @@ def busca(id):
     return jsonify({'mensagem':'ERRO! Charada não encontrado'}), 404
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run()
