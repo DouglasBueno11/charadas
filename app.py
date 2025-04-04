@@ -1,42 +1,110 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 import random
+import firebase_admin
+from firebase_admin import credentials, firestore
+from flask_cors import CORS
+import os
+import json
+from dotenv import load_dotenv
 
 app = Flask(__name__)
+CORS(app)
 
-charadas = [
-    {'id': 1, 'charada': 'Por que o computador foi ao médico?', 'resposta': 'Porque ele estava com um vírus.'},
-    {'id': 2, 'charada': 'O que é um vegetariano que come carne?', 'resposta': 'Um ex-vegetariano.'},
-    {'id': 3, 'charada': 'Como o oceano diz olá?', 'resposta': 'Ele acena.'},
-    {'id': 4, 'charada': 'Por que os pássaros não usam Facebook?', 'resposta': 'Porque já têm Twitter.'},
-    {'id': 5, 'charada': 'O que é pequeno e vermelho, mas não é uma maçã?', 'resposta': 'Um tomate com raiva.'},
-    {'id': 6, 'charada': 'O que acontece quando uma vaca pula sobre uma cerca?', 'resposta': 'A gacha é feita!'},
-    {'id': 7, 'charada': 'O que a banana falou para o tomate?', 'resposta': 'Você é muito maduro!'},
-    {'id': 8, 'charada': 'O que é um ponto vermelho no canto da sala?', 'resposta': 'Um tomate se escondendo!'},
-    {'id': 9, 'charada': 'Por que o lápis não pode ir para a escola?', 'resposta': 'Porque ele já estava apontado!'},
-    {'id': 10, 'charada': 'O que você chama um boomerangue que não volta?', 'resposta': 'Um pedaço de pau!'},
-    {'id': 11, 'charada': 'O que é verde e fica em cima da árvore?', 'resposta': 'Uma rã de bicicleta!'},
-    {'id': 12, 'charada': 'O que você chama de um cachorro que faz mágica?', 'resposta': 'Um labracadabrador!'},
-    {'id': 13, 'charada': 'Por que os esqueletos não brigam entre si?', 'resposta': 'Porque eles não têm coragem!'},
-    {'id': 14, 'charada': 'Como a geladeira se apresenta?', 'resposta': 'Ela diz: Estou cheia de gelo!'},
-    {'id': 15, 'charada': 'O que é um gato com um cinto?', 'resposta': 'Um cinturato!'}
-]
+load_dotenv()
 
+FBKEY = json.loads(os.getenv('CONFIG_FIREBASE'))
+
+cred = credentials.Certificate(FBKEY)
+firebase_admin.initialize_app(cred)
+
+# Conectando com o firestore da firebase
+db = firestore.client()
+
+# ROTA PRINCIPAL DE TESTE
 @app.route('/')
 def index():
     return 'Charada ta ON!'
 
+# MÉTODO GET - CHARADA ALEATÓRIA
 @app.route('/charadas', methods=['GET'])
-def charada():
-    charada_aleatoria = random.choice(charadas)
-    return jsonify(charada_aleatoria), 200
+def charada_aleatoria():
+    charadas = []
+    lista = db.collection('charadas').stream()
+    
+    for item in lista:
+        charadas.append(item.to_dict())
 
-@app.route('/charadas/<int:id>', methods=['GET'])
+    if charadas:
+        return jsonify(random.choice(charadas)), 200
+    else:
+        return jsonify({'mensagem:':'Erro! Nenhuma charada encontrada!'})
+
+# MÉTODO GET - CHARADA POR ID
+@app.route('/charadas/<id>', methods=['GET'])
 def busca(id):
-    for charada in charadas:
-        if charada['id'] == id:
-            return jsonify(charada), 200
+    doc_ref = db.collection('charadas').document(id)
+    doc = doc_ref.get().to_dict()
 
-    return jsonify({'mensagem':'ERRO! Charada não encontrado'}), 404
+    if doc:
+        return jsonify(doc), 200
+    else:
+        return jsonify({'mensagem':'Charada não encontrada'}), 404
+        
+# MÉTODO POST - ADICIONAR CHARADA
+@app.route('/charadas', methods=['POST'])
+def adicionar_charada():
+    dados = request.json
+
+    if "pergunta" not in dados or "resposta" not in dados:
+        return jsonify({'mensagem':'Erro. Campos pergunta e resposta são obrigatórios'}), 400
+    
+    #Contador
+    contador_ref = db.collection('controle_id').document('contador')
+    contador_doc = contador_ref.get().to_dict()
+    ultimo_id = contador_doc.get('id')
+    novo_id = int(ultimo_id) + 1
+    contador_ref.update({'id': novo_id}) #atualização da coleção
+
+    db.collection('charadas').document(str(novo_id)).set({
+        "id": novo_id,
+        "pergunta": dados['pergunta'],
+        "resposta": dados['resposta']
+    })
+
+    return jsonify({'mensagem':'Charada cadastrada com sucesso!'}), 201
+
+# MÉTODO PUT - ALTERAR CHARADA
+@app.route('/charadas/<id>', methods=['PUT'])
+def alterar_charada(id):
+    dados = request.json
+
+    if "pergunta" not in dados or "resposta" not in dados:
+        return jsonify({'mensagem':'Erro. Campos pergunta e resposta são obrigatórios'}), 400
+    
+    doc_ref = db.collection('charadas').document(id)
+    doc = doc_ref.get()
+
+    if doc.exists:
+        doc_ref.update({
+            'pergunta': dados['pergunta'],
+            'resposta': dados['resposta']
+        })
+        return jsonify({'mensagem': 'Charada atualizada com sucesso!'}), 201
+    else:
+        return jsonify({'mensagem': 'Erro! Charada não encontrada!'}), 404
+    
+# MÉTODO DELETE - EXCLUIR CHARADA
+@app.route('/charadas/<id>', methods=['DELETE'])
+def excluir_charada(id):
+    doc_ref = db.collection('charadas').document(id)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        return jsonify({'mensagem':'Erro! Charada não encontrada'})
+    
+    doc_ref.delete()
+    return jsonify({'mensagem':'Charada excluída com sucesso!'})
+
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True )
